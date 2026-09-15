@@ -148,6 +148,44 @@ class Signal(str, Enum):
     POW_RUNNING = "pow_running"
 
 
+def campo_preenchido(campo: dict[str, Any]) -> bool:
+    """
+    True só quando o retrato PROVA que o campo de resposta tem valor.
+
+    A chave ausente nunca prova preenchimento. O probe do browser sempre manda
+    `vazio`/`len` (ver browser_observer), mas um retrato montado à mão — fixture,
+    exemplo, replay de log antigo — costuma trazer só `valor`, e ler "sem a chave
+    `vazio`" como "preenchido" invertia o invariante do detector: concluía
+    TOKEN_GENERATED com o campo vazio, e `validate_completion` devolvia sucesso
+    sem token nenhum. Falso positivo é o erro caro aqui — na dúvida, pendente.
+    """
+    if "vazio" in campo:
+        return not campo["vazio"]
+    if campo.get("len") is not None:
+        return int(campo["len"] or 0) > 0
+    if "valor" in campo:
+        return bool(campo["valor"])
+    return False
+
+
+def tamanho_do_campo(campo: dict[str, Any]) -> int:
+    """Tamanho do valor, do `len` do probe ou medido no `valor` de fixture."""
+    if campo.get("len") is not None:
+        return int(campo["len"] or 0)
+    return len(str(campo.get("valor") or ""))
+
+
+def prefixo_do_campo(campo: dict[str, Any]) -> str:
+    """
+    Os 3 primeiros caracteres — só para reconhecer formato ('03A' do reCAPTCHA,
+    'P1_' do hCaptcha). Nunca o token inteiro.
+    """
+    prefixo = campo.get("prefixo")
+    if prefixo is None:
+        prefixo = str(campo.get("valor") or "")[:3]
+    return str(prefixo)
+
+
 @dataclass(frozen=True)
 class Evidence:
     """

@@ -1,9 +1,11 @@
 # decifra
 
-**Lê o texto de um captcha — de imagem ou de áudio — e devolve como string.**
-Roda na sua máquina, sem serviço pago. É uma biblioteca de *leitura*: não passa
-por proteção de fornecedor, não simula cliques de gente, não fabrica token de
-nada. Recebe os bytes de um captcha, devolve o que está escrito nele.
+**Identifica e lê captchas.** Diz qual captcha uma página usa (11 tipos), e
+resolve os que se resolvem *lendo* — captcha de texto em imagem e o canal de
+áudio de acessibilidade. Roda na sua máquina, sem serviço pago. Feito para entrar
+em **automação de processos (RPA)**: a automação chega numa página, pergunta o
+que tem ali, e para um captcha de imagem ou áudio recebe o texto pronto para
+digitar.
 
 ```python
 from leitor import imagem
@@ -11,12 +13,21 @@ from leitor import imagem
 texto = imagem.ler(png_bytes, tamanho=4)   # -> "9JBA"
 ```
 
-> Este repositório é um **estudo de engenharia**. O que ele mostra de verdade
-> não é "resolver captcha" — é o que se aprende medindo um problema com cuidado:
-> um OCR que salta de 16% para 64% com três linhas de pós-processamento, um
-> reconhecedor de fala que sai de 4% para 50% quando você ajusta *o espaçamento*
-> do áudio, e uma coleção de bugs que só apareceram porque a medição foi honesta.
-> A história está em [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md).
+Duas coisas que ele faz, ditas com precisão:
+
+- **Passa** por captcha de **imagem** e de **áudio** — porque, nesses, ler o
+  texto e digitá-lo *é* passar pelo captcha. É o mesmo que um humano faz.
+- **Detecta** (mas não resolve) captchas de **desafio-resposta** — reCAPTCHA,
+  hCaptcha, AWS WAF, GeeTest, Arkose, Friendly, ALTCHA. Esses emitem um token
+  preso à sessão do navegador: não há texto para ler, e o token não se gera de
+  fora. Saber que estão lá já ajuda a automação a decidir o que fazer.
+
+> Também é um **estudo de engenharia**. O que ele mostra de verdade não é
+> "resolver captcha" — é o que se aprende medindo com cuidado: um OCR que salta
+> de 16% para 64% com três linhas de pós-processamento, um reconhecedor de fala
+> que sai de 4% para 50% quando você ajusta *o espaçamento* do áudio, e uma
+> coleção de bugs que só apareceram porque a medição foi honesta. A história está
+> em [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md).
 
 ---
 
@@ -24,6 +35,7 @@ texto = imagem.ler(png_bytes, tamanho=4)   # -> "9JBA"
 
 - [O que é, em uma imagem](#o-que-é-em-uma-imagem)
 - [Rodando em 5 minutos](#rodando-em-5-minutos)
+- [Identificar qual captcha é](#identificar-qual-captcha-é)
 - [As duas vias de leitura](#as-duas-vias-de-leitura)
 - [O truque da imagem: "últimos N"](#o-truque-da-imagem-últimos-n)
 - [O truque do áudio: reespaçar a fala](#o-truque-do-áudio-reespaçar-a-fala)
@@ -76,6 +88,39 @@ python exemplos/uso_basico.py caminho/para/audio.wav --audio --tamanho 6
 
 A primeira leitura de imagem baixa o modelo de OCR (1,34 GB, uma vez só) e leva
 uns 20 segundos. Depois disso, cada leitura leva ~1,4 s.
+
+---
+
+## Identificar qual captcha é
+
+Antes de tentar resolver, uma automação precisa saber **com o que está lidando**.
+A camada de detecção olha a página e responde: reCAPTCHA (v2/v3/Enterprise),
+hCaptcha, AWS WAF, GeeTest (v3/v4), Arkose, Friendly, ALTCHA, ou captcha de
+imagem caseiro. É só leitura de DOM — não clica em nada.
+
+```mermaid
+flowchart LR
+    P["página<br/>(um snapshot do DOM)"] --> AD["11 adapters,<br/>cada um sua assinatura"]
+    AD --> C[classificador]
+    C --> R["reCAPTCHA v2 · checkbox · pendente"]
+    style C fill:#2563eb,color:#fff
+```
+
+```python
+from deteccao.adapters import ADAPTERS, Ctx
+from deteccao.core.classifier import classificar
+
+brutos = [a.detect(Ctx(retrato=retrato)) for a in ADAPTERS]   # retrato = snapshot do DOM
+for d in classificar([b for b in brutos if b.presente], Ctx(retrato=retrato)):
+    print(d.vendor.value, d.variant.value, d.state.value)
+```
+
+Isso importa para uma RPA porque **detectar não é resolver**: para um captcha de
+imagem, ela segue para o leitor; para um reCAPTCHA, ela sabe que não há o que ler
+e decide (pular, reenfileirar, avisar) em vez de travar. O desenho — padrão
+adapter, detecção multi-sinal, classificador — está em
+[docs/ARQUITETURA.md](docs/ARQUITETURA.md). Um exemplo rodável sem navegador está
+em [exemplos/uso_deteccao.py](exemplos/uso_deteccao.py).
 
 ---
 
@@ -187,9 +232,10 @@ completo está em [api/README.md](api/README.md).
 
 Isto é o limite do escopo, e é deliberado:
 
-- **Não passa por Cloudflare, reCAPTCHA, hCaptcha** ou qualquer proteção de
-  fornecedor. Esses sistemas emitem um token amarrado à sessão do navegador —
-  não há o que "ler", e gerar o token do lado de fora não funciona.
+- **Não resolve Cloudflare, reCAPTCHA, hCaptcha** ou qualquer desafio-resposta de
+  fornecedor. Ele os **detecta** (útil para a automação saber o que tem na
+  página), mas resolvê-los está fora do escopo: emitem um token amarrado à sessão
+  do navegador — não há o que "ler", e gerar o token do lado de fora não funciona.
 - **Não simula ser humano.** Não move mouse em curva, não resolve quebra-cabeça
   de arrastar peça, não tenta enganar detecção de bot.
 - **Não promete acertar sempre.** É um leitor com taxa de erro medida (~64% por
@@ -239,20 +285,21 @@ Quase sempre é mais rápida, mais estável, e dispensa o captcha por completo.
 ## Estrutura
 
 ```
+deteccao/     core/ (detector, classifier, base, models, ...)  ·  adapters/ (11 fornecedores)
 leitor/       imagem.py (OCR)  ·  _cascata.py (áudio)  ·  _motores.py (transcrição)
 api/          app.py (FastAPI)  ·  cliente.py (cliente de 1 arquivo)  ·  test_api.py
 testes/       testes sintéticos, sem rede e sem modelo
-exemplos/     servidor.py  ·  uso_basico.py
-docs/         COMO_FUNCIONA.md (o writeup)  ·  MEDICOES.md
+exemplos/     servidor.py  ·  uso_basico.py  ·  uso_deteccao.py
+docs/         COMO_FUNCIONA.md (o writeup)  ·  ARQUITETURA.md  ·  MEDICOES.md
 scripts/      varredura.py (trava de publicação)
 ```
 
 ## Rodando os testes
 
 ```bash
-python -m unittest testes.test_leitor -v     # leitor, sem rede nem modelo
-python -m unittest api.test_api -v           # API
-python leitor/imagem.py                       # selfcheck de um módulo só
+python -m unittest testes.test_leitor testes.test_deteccao -v   # leitor + detecção
+python -m unittest api.test_api -v                              # API
+python leitor/imagem.py                                          # selfcheck de um módulo só
 ```
 
 ## Licença

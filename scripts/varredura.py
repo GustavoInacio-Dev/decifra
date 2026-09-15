@@ -43,10 +43,12 @@ REGRAS: list[tuple[str, str]] = [
      r"\b(eproc|e-?saj|pje|infracaptcha|datajud)\b"),
 
     # 2. credenciais
-    ("token de serviço (32 maiúsculas)", r"\b[A-Z0-9]{32}\b"),
+    # (?-i:...) desliga o IGNORECASE só aqui: um token Wit é 32 chars MAIÚSCULOS,
+    # e sem isso a regra casava qualquer identificador CamelCase longo.
+    ("token de serviço (32 maiúsculas)", r"\b(?-i:[A-Z0-9]{32})\b"),
     ("sitekey de fornecedor", r"0x[0-9A-Za-z]{20,}"),
     ("chave reCAPTCHA", r"\b6L[0-9A-Za-z_-]{30,}\b"),
-    ("cookie de sessão", r"cf_clearance|_GRECAPTCHA|AUTH_SESSION_ID"),
+    ("cookie de sessão", r"cf_clearance|AUTH_SESSION_ID"),
 
     # 3. domínios
     ("domínio de produção", r"[a-z0-9.-]+\.(jus\.br|gov\.br)"),

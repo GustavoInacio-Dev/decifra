@@ -56,7 +56,7 @@ ao olhar a imagem ou ouvir a narração: transformar o que vê ou ouve em texto.
 ## Rodando em 5 minutos
 
 ```bash
-git clone https://github.com/<seu-usuario>/decifra.git
+git clone https://github.com/GustavoInacio-Dev/decifra.git
 cd decifra
 pip install -r requirements.txt
 ```

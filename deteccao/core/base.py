@@ -22,6 +22,9 @@ from .models import (
     State,
     Variant,
     Vendor,
+    campo_preenchido,
+    prefixo_do_campo,
+    tamanho_do_campo,
 )
 
 
@@ -255,13 +258,13 @@ class BaseAdapter:
         for f in campos:
             res.response_field = res.response_field or f.get("nome") or f.get("id")
             res.com(Evidence(Signal.RESPONSE_FIELD_PRESENT, f.get("nome") or "", origem="token"))
-            if f.get("vazio"):
-                res.com(Evidence(Signal.RESPONSE_FIELD_EMPTY, f.get("nome") or "", origem="token"))
-            else:
+            if campo_preenchido(f):
                 preenchido = f
                 res.com(Evidence(Signal.RESPONSE_FIELD_FILLED,
-                                 f"len={f.get('len')} prefixo={f.get('prefixo')}",
+                                 f"len={tamanho_do_campo(f)} prefixo={prefixo_do_campo(f)}",
                                  positiva=True, origem="token"))
+            else:
+                res.com(Evidence(Signal.RESPONSE_FIELD_EMPTY, f.get("nome") or "", origem="token"))
 
         # --- frames: informam, nunca decidem sozinhos --------------------- #
         for i in frames:

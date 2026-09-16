@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config import CONFIG, Config
+from .models import campo_preenchido, prefixo_do_campo, tamanho_do_campo
 from .telemetry import impressao_digital
 
 #: Vira o token do fornecedor em cookie. Cloudflare de fora, de propósito.
@@ -64,13 +65,13 @@ class TokenObserver:
         estado = EstadoToken()
 
         for f in retrato.get("responseFields", []):
-            if not f.get("vazio"):
+            if campo_preenchido(f):
                 estado.presente = True
                 estado.origem = "campo"
-                estado.tamanho = int(f.get("len") or 0)
+                estado.tamanho = tamanho_do_campo(f)
                 # fp derivado do que temos sem o valor: nome + tamanho + prefixo.
                 estado.fp = impressao_digital(
-                    f"{f.get('nome')}|{f.get('len')}|{f.get('prefixo')}"
+                    f"{f.get('nome')}|{estado.tamanho}|{prefixo_do_campo(f)}"
                 )
                 break
 

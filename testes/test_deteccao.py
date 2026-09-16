@@ -19,7 +19,8 @@ from deteccao.adapters import (  # noqa: E402
     ADAPTERS, Ctx, HCaptchaAdapter, RecaptchaV2Adapter,
 )
 from deteccao.core.classifier import classificar  # noqa: E402
-from deteccao.core.models import Vendor  # noqa: E402
+from deteccao.core.models import Signal, State, Vendor, campo_preenchido  # noqa: E402
+from deteccao.core.token_observer import TokenObserver  # noqa: E402
 
 
 def ctx(retrato: dict) -> Ctx:
@@ -73,6 +74,77 @@ class TesteReconhecimentoPorFornecedor(unittest.TestCase):
         deteccoes = detectar_tudo(r)
         vendors = {d.vendor for d in deteccoes}
         self.assertIn(Vendor.GENERIC, vendors)
+
+
+class TesteCampoDeResposta(unittest.TestCase):
+    """
+    Só evidência POSITIVA conclui 'resolvido'. Um campo cujo retrato não diz se
+    tem valor não prova nada — e era lido como preenchido, porque o código
+    perguntava `if f.get("vazio")` e a chave ausente cai no ramo do preenchido.
+    """
+
+    def _com_campo(self, campo: dict) -> dict:
+        r = _base()
+        r["containers"] = [{"seletor": ".g-recaptcha", "tag": "div",
+                            "attrs": {"class": "g-recaptcha", "data-sitekey": "ABC"}}]
+        r["responseFields"] = [dict({"nome": "g-recaptcha-response"}, **campo)]
+        return r
+
+    def test_predicado_exige_prova_de_valor(self):
+        self.assertFalse(campo_preenchido({"nome": "x"}))
+        self.assertFalse(campo_preenchido({"nome": "x", "valor": ""}))
+        self.assertFalse(campo_preenchido({"nome": "x", "vazio": True, "len": 0}))
+        self.assertFalse(campo_preenchido({"nome": "x", "len": 0}))
+        self.assertTrue(campo_preenchido({"nome": "x", "valor": "03Axyz"}))
+        self.assertTrue(campo_preenchido({"nome": "x", "vazio": False, "len": 6}))
+        self.assertTrue(campo_preenchido({"nome": "x", "len": 6}))
+
+    def test_campo_vazio_sem_a_chave_vazio_nao_gera_token(self):
+        """O retrato de fixture traz `valor: ''` e nenhum `vazio`."""
+        r = self._com_campo({"valor": ""})
+        res = RecaptchaV2Adapter().detect(ctx(r))
+        self.assertNotEqual(res.state, State.TOKEN_GENERATED)
+        self.assertEqual([e for e in res.evidencias if e.positiva], [])
+        self.assertIn(Signal.RESPONSE_FIELD_EMPTY, res.sinais)
+
+    def test_campo_sem_nenhuma_informacao_de_valor_fica_pendente(self):
+        """Na dúvida, pendente: falso positivo aqui submete formulário sem token."""
+        r = self._com_campo({})
+        res = RecaptchaV2Adapter().detect(ctx(r))
+        self.assertNotEqual(res.state, State.TOKEN_GENERATED)
+        self.assertFalse(RecaptchaV2Adapter().validate_completion(ctx(r)).sucesso)
+
+    def test_campo_marcado_vazio_pelo_probe_continua_pendente(self):
+        r = self._com_campo({"vazio": True, "len": 0, "prefixo": ""})
+        res = RecaptchaV2Adapter().detect(ctx(r))
+        self.assertNotEqual(res.state, State.TOKEN_GENERATED)
+
+    def test_campo_preenchido_pelo_probe_gera_token(self):
+        r = self._com_campo({"vazio": False, "len": 380, "prefixo": "03A"})
+        res = RecaptchaV2Adapter().detect(ctx(r))
+        self.assertEqual(res.state, State.TOKEN_GENERATED)
+        self.assertIn(Signal.RESPONSE_FIELD_FILLED, res.sinais)
+        self.assertTrue(RecaptchaV2Adapter().validate_completion(ctx(r)).sucesso)
+
+    def test_campo_preenchido_de_fixture_gera_token_e_nao_vaza_o_valor(self):
+        token = "03AGdBq26xSecretoNaoDeveVazar"
+        r = self._com_campo({"valor": token})
+        res = RecaptchaV2Adapter().detect(ctx(r))
+        self.assertEqual(res.state, State.TOKEN_GENERATED)
+        detalhe = next(e.detail for e in res.evidencias
+                       if e.signal is Signal.RESPONSE_FIELD_FILLED)
+        self.assertIn(f"len={len(token)}", detalhe)
+        self.assertIn("prefixo=03A", detalhe)
+        self.assertNotIn("Secreto", detalhe)
+
+    def test_token_observer_nao_inventa_token(self):
+        obs = TokenObserver(bridge=None)
+        r = self._com_campo({"valor": ""})
+        self.assertFalse(obs.observar(r).presente)
+        cheio = self._com_campo({"vazio": False, "len": 380, "prefixo": "03A"})
+        estado = obs.observar(cheio)
+        self.assertTrue(estado.presente)
+        self.assertEqual(estado.tamanho, 380)
 
 
 class TesteIntegracao(unittest.TestCase):
